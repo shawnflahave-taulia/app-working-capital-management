@@ -1,0 +1,130 @@
+apply plugin: 'idea'
+apply plugin: 'groovy'
+apply plugin: 'maven'
+apply plugin: 'application'
+apply plugin: 'artifactVersionInfo'
+
+project.ext.set('versionSuffix', project.hasProperty('release') ? '' : '-SNAPSHOT')
+project.mainClassName = 'com.taulia.assets.appWorkingCapitalManagement'
+project.ext.nodeBuildJsLocation = 'scripts/node/'
+project.ext.i18nMessagesFilePath = 'i18n/messages.csv'
+project.ext.i18nJsonFilePath = 'src/i18n/locales'
+
+def groupName = 'com.taulia.assets'
+group = groupName
+
+def versionName = '1.0'
+version = versionName + versionSuffix
+
+def groovyVersion = '2.0.2'
+
+
+buildscript {
+  project.ext.artifactoryReaderCredentials = {
+    username = 'reader'
+    password = '{DESede}rOkGnDDfNZXlDj3GRhancg=='
+  }
+  repositories {
+    maven {
+      credentials(artifactoryReaderCredentials)
+      url 'https://taulia.artifactoryonline.com/taulia/libs-releases-local'
+    }
+    maven {
+      credentials(artifactoryReaderCredentials)
+      url 'https://taulia.artifactoryonline.com/taulia/ext-releases-local'
+    }
+  }
+
+  dependencies {
+    classpath 'com.taulia.gradle:gradle-plugins:0.1'
+    classpath 'com.amazonaws:aws-java-sdk:1.1.5'
+  }
+
+}
+
+def standardRepos = {
+  maven {
+    credentials artifactoryReaderCredentials
+    url 'http://taulia.artifactoryonline.com/taulia/libs-releases-local/'
+  }
+  maven {
+    credentials artifactoryReaderCredentials
+    url 'https://taulia.artifactoryonline.com/taulia/libs-snapshots'
+  }
+  maven {
+    credentials artifactoryReaderCredentials
+    url 'https://taulia.artifactoryonline.com/taulia/ext-releases-local'
+  }
+}
+
+repositories(standardRepos)
+
+configurations {
+  nodeBuildJs
+}
+
+dependencies {
+  compile "org.codehaus.groovy:groovy-all:${groovyVersion}"
+
+  nodeBuildJs('com.taulia.assets:taulia-nodeBuildJs:0.2') {
+    transitive = false
+  }
+}
+
+jar {
+  baseName = 'taulia-appWorkingCapitalManagement'
+  into('src') {
+    from 'src'
+  }
+}
+
+uploadArchives.dependsOn('csvToJson')
+
+uploadArchives {
+  repositories {
+    mavenDeployer {
+      uniqueVersion = false
+      def configureAuth = {
+        authentication(
+          userName: project.hasProperty('release') ? artifactoryPublisher : 'snapshotdeployer',
+          password: project.hasProperty('release') ? artifactoryPublisherPassword : '{DESede}/AhTU4rospCtB650ihtaSw=='
+        )
+      }
+      snapshotRepository( url: "https://taulia.artifactoryonline.com/taulia/libs-snapshots-local/", configureAuth)
+      repository(url: "https://taulia.artifactoryonline.com/taulia/libs-releases-local", configureAuth)
+    }
+  }
+}
+
+task copyNodeBuildJs << {
+  String scriptVersion = configurations.nodeBuildJs.singleFile.getName()
+  File sourceFile = new File("${project.ext.nodeBuildJsLocation}/source")
+  if (!sourceFile.exists() || (sourceFile.exists() && !sourceFile.text.contains(scriptVersion))) {
+    println "Copying assets from ${scriptVersion}"
+    delete nodeBuildJsLocation
+    copy {
+      from (zipTree(configurations.nodeBuildJs.singleFile)) {
+      }
+      into project.ext.nodeBuildJsLocation
+    }
+    sourceFile << nodeBuildJsLocation
+  }
+}
+
+task csvToJson(dependsOn: ['copyNodeBuildJs']) << {
+  File dir = new File(project.ext.i18nJsonFilePath)
+  if (!dir.exists()) {
+    dir.mkdirs()
+  }
+  def process = [
+    'node',
+    project.ext.nodeBuildJsLocation + 'src/i18n/csvToJson.js',
+    project.ext.i18nMessagesFilePath,
+    project.ext.i18nJsonFilePath
+  ].execute()
+  process.consumeProcessErrorStream(System.err)
+  process.consumeProcessOutputStream(System.out)
+  process.waitFor()
+}
+
+
